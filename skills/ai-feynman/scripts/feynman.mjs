@@ -891,7 +891,7 @@ function buildNotesScaffold(st, ledger) {
   L.push('');
   L.push('## 2. 机制链');
   L.push('A —(主语+动作)→ B —(主语+动作)→ C');
-  L.push('每步标注 [已验证 #n] / [推断]，编号指向 sources.md。');
+  L.push('每步标 sources.md 的 claim 编号（如 （#2））；推断的步骤用一句话点明，不打标签。');
   L.push('不许出现「然后就…」「自然就…」。');
   L.push('');
   L.push('## 3. 边界与代价');
