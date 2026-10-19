@@ -144,15 +144,29 @@ node <skill-dir>/scripts/feynman.mjs test <slug> --concepts <弱项id列表> --n
 
 **循环上限**：同一个概念连着 3 轮不过 → 停下来，改用窄带重讲（只重讲卡住的那一个子步骤）；再不过说明前置概念缺了 → 回 Phase 0 补一个前置概念，别硬推。
 
+要闭合哪些 gap、它们的 `gid` 是什么，用 `gaps` 查——它列出未闭合项，并给出可直接粘贴的 `resolves` 片段：
+
+```bash
+node <skill-dir>/scripts/feynman.mjs gaps <slug>
+```
+
 闭合的 gap 一定要在 `results` 的 `resolves` 里填上 `gid`，不然致命 gap 永远不解除，mastery 就一直被封在 0.4。
 
 **出口**：没有未闭合的致命 gap，各概念 mastery ≥ 0.8（看 `status`）。
 
 ### Phase 6 固化
 
-照 `references/artifacts.md` 的模板写 `notes.md`。
+先生成骨架，再往里填：
 
-第 4 节「我曾以为」是整份笔记最值钱的地方，必须拿 `gaps.md` 里用户的原话整理，别美化成中性描述。「我原以为 render 阶段 setState 没问题」是能复现的心智模型诊断；「对 render 阶段纯度要求理解不足」听着没错，但没有任何诊断价值。
+```bash
+node <skill-dir>/scripts/feynman.mjs notes <slug> --scaffold
+```
+
+第 4 节「我曾以为」由 gap 原话自动灌入（`--scaffold` 已经做了这步），你只需逐条补完「我原以为 → 实际是 → 我为什么会这样想」；第 7 节信源从 `sources.md` 摘录。第 0–3、5、6 节按 `references/artifacts.md` 的模板填。
+
+有未闭合致命 gap 时 `--scaffold` 会拒绝生成（铁律 3），`--force` 是显式逃生口。
+
+第 4 节是整份笔记最值钱的地方——它记的是心智模型诊断，不是知识点摘要。所以别把灌进去的原话美化成中性描述：「我原以为 render 阶段 setState 没问题」能复现你当时的错误模型；「对 render 阶段纯度要求理解不足」听着没错，但没有任何诊断价值。
 
 最后跑一下 `status`，把下次复习时间告诉用户。
 
@@ -164,6 +178,8 @@ concepts  <slug> --file concepts.json                              注册概念�
 bank      <slug> --check                                           校验题库
 test      <slug> [--n 8] [--concepts a,b] [--due-only] [--seed S]  加权抽样出卷
 record    <slug> --results results/sN.json [--session sN]          判分落账
+gaps      <slug> [--concept <id>] [--all]                          列出 gap 台账 + 可粘贴的 resolves 片段
+notes     <slug> --scaffold [--force]                              生成笔记骨架（灌入 gap 原话与信源）
 status    <slug>                                                   进度看板 + NEXT 建议
 ```
 

@@ -19,6 +19,8 @@ const USAGE = `用法: node feynman.mjs <command> <slug> [options]
   bank      <slug> --check
   test      <slug> [--n 8] [--concepts a,b] [--due-only] [--seed S]
   record    <slug> --results results/sN.json [--session sN]
+  gaps      <slug> [--concept <id>] [--all]
+  notes     <slug> --scaffold [--force]
   status    <slug>
 
 公共选项: --dir <工作区根目录，默认 ./feynman>`;
@@ -769,8 +771,234 @@ function cmdStatus() {
   console.log(`\nNEXT: ${nextAction(st)}`);
 }
 
+// ── gaps ──────────────────────────────────────────────────────────────
+// Phase 5 的入口：闭合 gap 要往 results 里填 gid，而 gid 只存在于 state.json。
+// 让人去翻 state.json 找 gid 既费事又容易抄错，这里直接列出来并给出可粘贴的片段。
+function cmdGaps() {
+  const st = loadState();
+  const only = opt('concept');
+  const showAll = flag('all');
+  const SEV_ORDER = { '致命': 0, '重要': 1, '细节': 2 };
+  if (only && !st.concepts[only])
+    fail(`未知概念: ${only}\n已注册: ${Object.keys(st.concepts).join(', ') || '(无)'}`);
+
+  const rows = [];
+  for (const c of Object.values(st.concepts)) {
+    if (only && c.id !== only) continue;
+    for (const g of c.gaps || []) {
+      if (!showAll && g.resolved) continue;
+      rows.push({ c, g });
+    }
+  }
+  rows.sort(
+    (a, b) =>
+      (SEV_ORDER[a.g.severity] ?? 9) - (SEV_ORDER[b.g.severity] ?? 9) ||
+      (a.g.round ?? 0) - (b.g.round ?? 0) ||
+      String(a.g.gid).localeCompare(String(b.g.gid)),
+  );
+
+  const scope = only ? `概念 ${only}` : '全部概念';
+  console.log(`# Gap 台账 · ${st.title} (${st.slug}) · ${scope}`);
+  if (!rows.length) {
+    console.log('');
+    console.log(showAll ? '本主题还没有任何 gap 记录。' : '无未闭合 gap。');
+    if (!showAll) console.log('（要看已闭合的加 --all）');
+    console.log(`\nNEXT: ${nextAction(st)}`);
+    return;
+  }
+
+  console.log('');
+  console.log(
+    padEnd('gid', 6) + padEnd('概念', 20) + padEnd('类型', 12) + padEnd('严重度', 10) +
+    padEnd('轮次', 14) + padEnd('触发题', 9) + '状态',
+  );
+  for (const { c, g } of rows) {
+    const state = g.resolved ? `已闭合 ${g.resolved_at || ''}`.trim() : '未闭合';
+    console.log(
+      padEnd(g.gid, 6) + padEnd(c.id, 20) + padEnd(g.type || '-', 12) + padEnd(g.severity || '-', 10) +
+      padEnd(`第${g.round}轮(${g.session})`, 14) + padEnd(g.question_id || '-', 9) + state,
+    );
+    // source_ref 实际常是一整句（如「年报 第53页；sources.md claim #4」），塞进表格会把
+    // 每行撑到换行、整张表没法看。放到行下方单独一行。
+    console.log(`      ↳ 回源: ${g.source_ref || '(缺回源)'}`);
+  }
+
+  const open = rows.filter((r) => !r.g.resolved);
+  if (open.length) {
+    console.log('');
+    console.log(`未闭合 ${open.length} 条。闭合方式：在**考到该概念的那一轮** results 文件里填 resolves，可直接粘贴：`);
+    console.log(`  "resolves": ${JSON.stringify(open.map((r) => r.g.gid))}`);
+    console.log('（resolves 里的 gap 必须属于本轮实际考过的概念，否则 record 会拒绝。）');
+  }
+  console.log('');
+  console.log(`NEXT: ${nextAction(st)}`);
+}
+
+// ── notes ─────────────────────────────────────────────────────────────
+// Phase 6 的入口。第 4 节「我曾以为」的价值全在 gap 原话上，手抄既费事又会走样，
+// 所以直接把 gap.detail 原文灌进骨架；第 7 节信源从 sources.md 摘。
+function parseSourcesLedger(p) {
+  // 返回 { t1: [{src,date}], t2: [...] }。
+  // 优先用「一手信源」这类人工整理的信源表（避免混进 claim 表的回源坐标）；
+  // 它带「级」列时按列分级，没有时整表当 T1。claim 表只在人工表缺失时兜底。
+  const empty = { t1: [], t2: [] };
+  if (!fs.existsSync(p)) return empty;
+  const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+  const curated = { T1: new Map(), T2: new Map(), T3: new Map() };
+  const claims = { T1: new Map(), T2: new Map(), T3: new Map() };
+  const isSep = (s) => /^[-: ]+$/.test(s);
+  let heading = '';
+  for (const line of lines) {
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    if (h) { heading = h[1]; continue; }
+    if (!line.trim().startsWith('|')) continue;
+    const cells = line.split('|').slice(1, -1).map((s) => s.trim());
+    if (cells.length === 6 && /^\d+$/.test(cells[0])) {
+      // claim 行：| # | claim | 信源 | 级 | 抓取日期 | 状态 |
+      if (claims[cells[3]]) claims[cells[3]].set(cells[2], cells[4]);
+    } else if (cells.length === 4 && /T1|T2|一手/.test(heading) && cells[0] !== '信源' && !isSep(cells[0]) && /^T[1-3]$/.test(cells[1])) {
+      // 一手信源表（带分级）：| 信源 | 级 | 说明 | 抓取日期 |
+      // 一手信源表本身没有分级列时，整表只能当 T1；带分级列才能分开。
+      curated[cells[1]].set(cells[0], cells[3]);
+    } else if (cells.length === 3 && /T1|T2|一手/.test(heading) && cells[0] !== '信源' && !isSep(cells[0])) {
+      // 一手信源表（旧格式，无分级列）：| 信源 | 说明 | 抓取日期 |
+      const level = /T2/.test(heading) && !/T1/.test(heading) ? 'T2' : 'T1';
+      curated[level].set(cells[0], cells[2]);
+    }
+  }
+  const toList = (m) => [...m.entries()].map(([src, date]) => ({ src, date }));
+  const pick = (level) => (curated[level].size ? curated[level] : claims[level]);
+  return { t1: toList(pick('T1')), t2: toList(pick('T2')), t3: toList(pick('T3')) };
+}
+function buildNotesScaffold(st, ledger) {
+  const cs = Object.values(st.concepts);
+  const gaps = [];
+  for (const c of cs) for (const g of c.gaps || []) gaps.push({ c, g });
+  gaps.sort((a, b) => (a.g.round ?? 0) - (b.g.round ?? 0) || String(a.g.gid).localeCompare(String(b.g.gid)));
+
+  const L = [];
+  L.push(`# 费曼笔记 · ${st.title}`);
+  L.push('');
+  if (st.target) L.push(`> 学习目标：${st.target}`);
+  L.push(`> 生成于 ${todayISO()}（notes --scaffold）。第 4 节由 gap 台账自动灌入、第 7 节从 sources.md 摘录；其余各节按 references/artifacts.md 的模板填写。`);
+  L.push('');
+  L.push('## 0. 一句话本质');
+  L.push('禁用领域术语，≤ 40 字。写不出来就是 G1 没过。');
+  L.push('');
+  L.push('## 1. 给外行的类比');
+  L.push('类比 + **失效声明**：「这个类比在 X 处不成立」。');
+  L.push('没有失效声明的类比是有害的（检测器 5）。');
+  L.push('');
+  L.push('## 2. 机制链');
+  L.push('A —(主语+动作)→ B —(主语+动作)→ C');
+  L.push('每步标注 [已验证 #n] / [推断]，编号指向 sources.md。');
+  L.push('不许出现「然后就…」「自然就…」。');
+  L.push('');
+  L.push('## 3. 边界与代价');
+  L.push('- 失效场景（具体输入，不要写「极端情况下」）');
+  L.push('- 换来的代价 / 牺牲的性质');
+  L.push('- 什么情况下不该选它');
+  L.push('');
+  L.push('## 4. 我曾以为（Gap 复盘）');
+  L.push('');
+  L.push('> 下面每条都直接取自 gaps.md 的**原话**，不许美化、不许压缩成一行。');
+  L.push('> 逐条补完「我原以为 → 实际是 → 我为什么会这样想」。');
+  L.push('');
+  if (!gaps.length) {
+    L.push('（本主题还没有 gap 记录——若确实如此，说明一路无 gap 通过；否则先跑 record。）');
+  } else {
+    for (const { c, g } of gaps) {
+      L.push(`### ${g.gid} · ${c.id} · ${g.severity} · ${g.type}${g.resolved ? '（已闭合）' : '（未闭合）'}`);
+      L.push('');
+      L.push(`- 轮次: 第 ${g.round} 轮 (${g.session}) · ${g.date} · 触发题 \`${g.question_id}\``);
+      // gap.detail 常常自带「原话：」前缀，再套一层标签会变成「原话: 原话：…」。
+      const quote = String(g.detail || '').replace(/^原话[：:]\s*/, '');
+      L.push(`- 原话: ${quote}`);
+      L.push('- 我原以为：');
+      L.push('- 实际是：');
+      L.push('- 我为什么会这样想：');
+      L.push('');
+    }
+  }
+  L.push('## 5. 常见误解');
+  L.push('含 sources.md 登记的信源冲突、T4 流传的错误说法、以及我自己在 Phase 2 讲解里犯过又修掉的错。');
+  L.push('');
+  L.push('## 6. 未解问题');
+  L.push('标 `未知` 的那些，以及下一步该读什么（给出具体信源，不写「以后再说」）。');
+  L.push('');
+  L.push('## 7. 信源');
+  L.push('');
+  if (!ledger.t1.length && !ledger.t2.length && !ledger.t3.length) {
+    L.push('（sources.md 里没解析到 T1–T3 条目——请手工补上信源与抓取日期。）');
+  } else {
+    if (ledger.t1.length) {
+      L.push('**T1（唯一可支撑具体断言）**');
+      L.push('');
+      for (const s of ledger.t1) L.push(`- ${s.src} — ${s.date}`);
+      L.push('');
+    }
+    if (ledger.t2.length) {
+      L.push('**T2（可支撑机制与设计动机）**');
+      L.push('');
+      for (const s of ledger.t2) L.push(`- ${s.src} — ${s.date}`);
+      L.push('');
+    }
+    if (ledger.t3.length) {
+      L.push('**T3（从业者经验，需回指到 T1/T2 才可断言）**');
+      L.push('');
+      for (const s of ledger.t3) L.push(`- ${s.src} — ${s.date}`);
+      L.push('');
+    }
+  }
+  return L.join('\n');
+}
+
+// init 写的 notes.md 只有标题与一行提示；那不算「已有内容」。
+function isPlaceholderNotes(text) {
+  const body = text
+    .split(/\r?\n/)
+    .filter((l) => !/^#\s/.test(l) && !/^>/.test(l))
+    .join('')
+    .trim();
+  return body.length === 0;
+}
+
+function cmdNotes() {
+  const st = loadState();
+  if (!flag('scaffold'))
+    fail(`用法: notes <slug> --scaffold [--force]\n（当前只支持 --scaffold：从 gap 台账与 sources.md 生成 notes.md 骨架）`);
+  const force = flag('force');
+  const notesPath = path.join(topicDir, 'notes.md');
+  const cs = Object.values(st.concepts);
+
+  // 铁律 3：带未闭合致命 gap 不许固化。这是唯一的硬闸门，--force 是显式逃生口。
+  const fatal = cs.reduce((s, c) => s + openGaps(c, '致命').length, 0);
+  if (fatal && !force)
+    fail(
+      `仍有 ${fatal} 个未闭合致命 gap，禁止固化（铁律 3）。\n` +
+        `先 ${selfCmd()} gaps ${st.slug} 看是哪些，回源补完再 record 闭合。\n` +
+        `确要强行生成骨架可加 --force（不推荐：会把错误理解固化成文档）。`,
+    );
+
+  const weak = cs.filter((c) => (c.mastery ?? 0) < PASS_MASTERY);
+  if (weak.length && !force)
+    console.log(`警告: ${weak.length} 个概念 mastery < ${PASS_MASTERY}（${weak.map((c) => c.id).join(', ')}）——骨架照生成，但笔记内容可能还站不住。`);
+
+  if (fs.existsSync(notesPath) && !force && !isPlaceholderNotes(fs.readFileSync(notesPath, 'utf8')))
+    fail(`notes.md 已有内容，拒绝覆盖: ${notesPath}\n（确要重建可加 --force，会丢掉现有内容。）`);
+
+  const ledger = parseSourcesLedger(path.join(topicDir, 'sources.md'));
+  fs.writeFileSync(notesPath, buildNotesScaffold(st, ledger), 'utf8');
+
+  const gapCount = cs.reduce((s, c) => s + (c.gaps || []).length, 0);
+  console.log(`已生成笔记骨架: ${notesPath}`);
+  console.log(`  概念 ${cs.length} 个 · 灌入 gap ${gapCount} 条 · 信源 T1 ${ledger.t1.length} / T2 ${ledger.t2.length}`);
+  console.log('\n第 0–3、5、6 节需要按 references/artifacts.md 的模板填；第 4、7 节已自动生成。');
+  console.log(`\nNEXT: ${nextAction(st)}`);
+}
+
 // ── dispatch ──────────────────────────────────────────────────────────
-const COMMANDS = { init: cmdInit, concepts: cmdConcepts, bank: cmdBank, test: cmdTest, record: cmdRecord, status: cmdStatus };
+const COMMANDS = { init: cmdInit, concepts: cmdConcepts, bank: cmdBank, test: cmdTest, record: cmdRecord, gaps: cmdGaps, notes: cmdNotes, status: cmdStatus };
 
 try {
   if (!cmd || cmd === '-h' || cmd === '--help' || flag('help')) {

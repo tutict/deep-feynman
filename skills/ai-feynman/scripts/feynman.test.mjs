@@ -502,7 +502,207 @@ test('D8: 报错信息不出现 undefined，且不重复报同一题', () => {
   assert.ok(ghostLines.length <= 2, `同一题的错误信息应去重（当前 ${ghostLines.length} 条）：\n${rec.out}`);
 });
 
-test('回归: 全绿链路 init→concepts→bank→test→record→status 能跑通', () => {
+// ═══════════════════════════════════════════════════════════════════
+// 阶段 E：闭环摩擦（gaps / notes --scaffold）
+// ═══════════════════════════════════════════════════════════════════
+
+const gateFail = { G1: false, G2: false, G3: false, G4: false };
+
+test('E1: 无 gap 时 gaps 输出提示，且不报错', () => {
+  setup();
+  const g = run(['gaps', 'x']);
+  assert.equal(g.code, 0, g.out);
+  assert.match(g.out, /无未闭合 gap/);
+});
+
+test('E2: gaps 列出 gid 与严重度优先排序，并给出可粘贴的 resolves 片段', () => {
+  setup();
+  run(['test', 'x', '--n', '2', '--concepts', 'alpha', '--seed', '3']);
+  const sid = Object.keys(readState('x').sessions)[0];
+  const ids = readState('x').sessions[sid].question_ids;
+  // 第一题判 score 1（重要），第二题判 score 0（致命）
+  fillResults(
+    'x',
+    sid,
+    ids.map((question_id, i) =>
+      i === 0
+        ? { question_id, score: 1, gates: gatesNoG3, gap_type: '边界失守', severity: '重要', note: '原话：它就是更快一点' }
+        : { question_id, score: 0, gates: gateFail, gap_type: '跳步', severity: '致命', note: '原话：然后就自动同步了' },
+    ),
+  );
+  const rec = run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
+  assert.equal(rec.code, 0, rec.out);
+
+  const g = run(['gaps', 'x']);
+  assert.equal(g.code, 0, g.out);
+  assert.ok(g.out.indexOf('致命') < g.out.indexOf('重要'), `致命 gap 应排在重要之前：\n${g.out}`);
+  assert.match(g.out, /"resolves": \["g\d+","g\d+"\]/, `应给出可粘贴的 resolves 片段：\n${g.out}`);
+  assert.match(g.out, /src\.md#L/, `应带出 bank.json 的回源坐标：\n${g.out}`);
+});
+
+test('E3: gaps --concept 过滤，--all 含已闭合，未知概念报错', () => {
+  setup();
+  run(['test', 'x', '--n', '2', '--concepts', 'alpha', '--seed', '3']);
+  const sid = Object.keys(readState('x').sessions)[0];
+  const ids = readState('x').sessions[sid].question_ids;
+  fillResults(
+    'x',
+    sid,
+    ids.map((question_id) => ({ question_id, score: 0, gates: gateFail, gap_type: '跳步', severity: '致命', note: '原话：然后就自动同步了' })),
+  );
+  run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
+
+  const filtered = run(['gaps', 'x', '--concept', 'beta']);
+  assert.equal(filtered.code, 0, filtered.out);
+  assert.match(filtered.out, /无未闭合 gap/, `beta 无 gap，应提示无：\n${filtered.out}`);
+
+  const bad = run(['gaps', 'x', '--concept', 'nope']);
+  assert.notEqual(bad.code, 0, `未知概念应报错：\n${bad.out}`);
+
+  // 重考 alpha 并闭合第一条 gap
+  const gid = readState('x').concepts.alpha.gaps[0].gid;
+  run(['test', 'x', '--n', '2', '--concepts', 'alpha', '--seed', '5']);
+  const sid2 = Object.keys(readState('x').sessions).filter((s) => s !== sid).pop();
+  const ids2 = readState('x').sessions[sid2].question_ids;
+  const p = fillResults('x', sid2, ids2.map((question_id) => ({ question_id, score: 2, gates: gatesAll })));
+  const r2 = readJson('x', path.join('results', `${sid2}.json`));
+  r2.resolves = [gid];
+  fs.writeFileSync(p, JSON.stringify(r2, null, 2), 'utf8');
+  const rec2 = run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid2}.json`)]);
+  assert.equal(rec2.code, 0, rec2.out);
+
+  const def = run(['gaps', 'x']);
+  assert.ok(!new RegExp(`${gid}\\b`).test(def.out), `已闭合的 ${gid} 不应出现在默认视图：\n${def.out}`);
+  const all = run(['gaps', 'x', '--all']);
+  assert.match(all.out, new RegExp(gid), `--all 应含已闭合的 ${gid}：\n${all.out}`);
+  assert.match(all.out, /已闭合/);
+});
+
+test('E4: notes --scaffold 遇未闭合致命 gap 拒绝，--force 放行（铁律 3）', () => {
+  setup();
+  run(['test', 'x', '--n', '1', '--concepts', 'alpha', '--seed', '3']);
+  const sid = Object.keys(readState('x').sessions)[0];
+  const ids = readState('x').sessions[sid].question_ids;
+  fillResults(
+    'x',
+    sid,
+    ids.map((question_id) => ({ question_id, score: 0, gates: gateFail, gap_type: '跳步', severity: '致命', note: '原话：然后就自动同步了' })),
+  );
+  run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
+
+  const n = run(['notes', 'x', '--scaffold']);
+  assert.notEqual(n.code, 0, `有未闭合致命 gap 时应拒绝固化：\n${n.out}`);
+  assert.match(n.out, /致命|铁律 3/);
+
+  const f = run(['notes', 'x', '--scaffold', '--force']);
+  assert.equal(f.code, 0, `--force 应放行：\n${f.out}`);
+});
+
+test('E5: notes --scaffold 把 gap 原话灌进第 4 节，已有内容时拒绝覆盖', () => {
+  setup();
+  run(['test', 'x', '--n', '1', '--concepts', 'alpha', '--seed', '3']);
+  const sid = Object.keys(readState('x').sessions)[0];
+  const ids = readState('x').sessions[sid].question_ids;
+  fillResults(
+    'x',
+    sid,
+    ids.map((question_id) => ({ question_id, score: 1, gates: gatesNoG3, gap_type: '边界失守', severity: '重要', note: '原话：它就是更快一点' })),
+  );
+  run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
+
+  const n = run(['notes', 'x', '--scaffold']);
+  assert.equal(n.code, 0, n.out);
+  const md = fs.readFileSync(path.join(wsDir('x'), 'notes.md'), 'utf8');
+  assert.match(md, /## 4\. 我曾以为/);
+  assert.match(md, /它就是更快一点/, `第 4 节应含 gap 原话：\n${md}`);
+  assert.match(md, /我原以为：/, `第 4 节应留出「我原以为」的填空：\n${md}`);
+  assert.match(md, /## 7\. 信源/);
+
+  // 已有实质内容 → 拒绝覆盖
+  fs.writeFileSync(path.join(wsDir('x'), 'notes.md'), '# 费曼笔记 · 测试主题\n\n## 0. 一句话本质\n\n已经写好的内容。\n', 'utf8');
+  const n2 = run(['notes', 'x', '--scaffold']);
+  assert.notEqual(n2.code, 0, `已有内容时应拒绝覆盖：\n${n2.out}`);
+  assert.match(n2.out, /拒绝覆盖|已有内容/);
+});
+test('E6: 第 7 节优先用人工整理的信源表，不把分隔行或 claim 回源坐标当信源', () => {
+  setup();
+  fs.writeFileSync(
+    path.join(wsDir('x'), 'sources.md'),
+    [
+      '# 信源台账 · 测试主题',
+      '',
+      '## 一手信源（T1）',
+      '',
+      '| 信源 | 说明 | 抓取日期 |',
+      '|---|---|---|',
+      '| 官方规范 A | 主信源 | 2026-01-02 |',
+      '',
+      '## 具体断言',
+      '',
+      '| # | claim | 信源 | 级 | 抓取日期 | 状态 |',
+      '|---|-------|------|----|----------|------|',
+      '| 1 | A 是这样运作的 | src.md#L1 | T1 | 2026-01-02 | 已验证 |',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  const n = run(['notes', 'x', '--scaffold']);
+  assert.equal(n.code, 0, n.out);
+  const md = fs.readFileSync(path.join(wsDir('x'), 'notes.md'), 'utf8');
+  const sec7 = md.slice(md.indexOf('## 7. 信源'));
+  assert.match(sec7, /官方规范 A — 2026-01-02/, `应摘录人工整理的信源：\n${sec7}`);
+  assert.ok(!/^- --- /m.test(sec7), `不应把表格分隔行当信源：\n${sec7}`);
+  assert.ok(!sec7.includes('src.md#L1'), `有人工信源表时不应回落到 claim 回源坐标：\n${sec7}`);
+});
+test('E7: gaps 把回源坐标放到行下方，不撑爆表格', () => {
+  setup();
+  run(['test', 'x', '--n', '2', '--concepts', 'alpha', '--seed', '3']);
+  const sid = Object.keys(readState('x').sessions)[0];
+  const ids = readState('x').sessions[sid].question_ids;
+  fillResults(
+    'x',
+    sid,
+    ids.map((question_id) => ({ question_id, score: 0, gates: gateFail, gap_type: '跳步', severity: '致命', note: '原话：然后就自动同步了' })),
+  );
+  run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
+
+  const g = run(['gaps', 'x']);
+  assert.equal(g.code, 0, g.out);
+  const header = g.out.split(/\r?\n/).find((l) => l.startsWith('gid'));
+  assert.ok(header && !header.includes('回源'), `表头不该有回源坐标列（会把每行撑爆）：${header}`);
+  assert.match(g.out, /↳ 回源: /, `回源坐标应在行下方单独一行：\n${g.out}`);
+});
+
+test('E8: 第 7 节按「一手信源」表的级列分级，不把 T2/T3 误标成 T1', () => {
+  setup();
+  fs.writeFileSync(
+    path.join(wsDir('x'), 'sources.md'),
+    [
+      '# 信源台账 · 测试主题',
+      '',
+      '## 一手信源',
+      '',
+      '| 信源 | 级 | 说明 | 抓取日期 |',
+      '|---|---|---|---|',
+      '| 平台官方公告 | T1 | 分成档位 | 2026-01-02 |',
+      '| 行业框架 | T2 | 学科划分 | 2026-01-02 |',
+      '| 从业者文章 | T3 | 开发时间线 | 2026-01-02 |',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  const n = run(['notes', 'x', '--scaffold']);
+  assert.equal(n.code, 0, n.out);
+  const md = fs.readFileSync(path.join(wsDir('x'), 'notes.md'), 'utf8');
+  const sec7 = md.slice(md.indexOf('## 7. 信源'));
+  const t1 = sec7.slice(sec7.indexOf('**T1'), sec7.indexOf('**T2'));
+  assert.match(t1, /平台官方公告/, `T1 段应含平台官方公告：\n${sec7}`);
+  assert.ok(!t1.includes('行业框架'), `T2 信源不该出现在 T1 段：\n${t1}`);
+  assert.match(sec7, /\*\*T2[\s\S]*行业框架/, `T2 段应含行业框架：\n${sec7}`);
+  assert.match(sec7, /\*\*T3[\s\S]*从业者文章/, `T3 段应含从业者文章：\n${sec7}`);
+});
+
+test('回归: 全绿链路 init→concepts→bank→test→record→gaps→notes→status 能跑通', () => {
   setup();
   assert.equal(run(['bank', 'x', '--check']).code, 0);
   const t = run(['test', 'x', '--n', '3', '--seed', '11']);
@@ -512,6 +712,10 @@ test('回归: 全绿链路 init→concepts→bank→test→record→status 能�
   fillResults('x', sid, ids.map((question_id) => ({ question_id, score: 2, gates: gatesAll })));
   const rec = run(['record', 'x', '--results', path.join('feynman', 'x', 'results', `${sid}.json`)]);
   assert.equal(rec.code, 0, rec.out);
+  const g = run(['gaps', 'x']);
+  assert.equal(g.code, 0, g.out);
+  const n = run(['notes', 'x', '--scaffold']);
+  assert.equal(n.code, 0, n.out);
   const s = run(['status', 'x']);
   assert.equal(s.code, 0, s.out);
   assert.match(s.out, /NEXT:/);

@@ -1,0 +1,134 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "concept": "game-parts-roles",
+      "type": "explain",
+      "difficulty": 1,
+      "prompt": "抛开某一个具体游戏，用大白话说：一个游戏在「被做出来」这件事上，由哪几个部分组成？至少说四个，并各举一个例子。",
+      "reference_answer": "G1 判分要点：\n- 至少说出四个组成部分，例如：玩法规则/系统、内容资产（美术/音频/文本）、程序逻辑、界面呈现、关卡与数值\n- 每个部分配一个具体例子（如「玩法规则」→ 跳跃的重力与判定；「内容资产」→ 角色模型与音效）\n- 用领域外的词说清，不靠术语堆砌；把专业名词全删掉后仍应剩下信息\nG2 加分：能说明部分之间的关系（规则决定程序要写什么，程序决定资产何时被调用）",
+      "common_wrong": "只说「策划、程序、美术」——那是角色不是组成部分；或只答「代码和美术」",
+      "source_ref": "IGDA Curriculum Framework v3.2beta §2（生产环节 management/design/programming/audio/graphic design/writing/testing/QA）、§3（核心领域）；sources.md claim #8 #9"
+    },
+    {
+      "id": "q2",
+      "concept": "game-parts-roles",
+      "type": "mechanism",
+      "difficulty": 2,
+      "prompt": "策划、程序、美术这三类角色，各自对什么负责？请说清他们各自的产出物是什么。",
+      "reference_answer": "G2 判分要点：\n- 策划：定义玩法规则、系统、数值与体验目标；产出设计文档与规则原型\n- 程序：把规则实现为可运行逻辑；产出可运行的构建\n- 美术：产出视觉资产（模型/贴图/动画/界面视觉）\n- 每类都要有「主语+动作」式的职责描述，不能只说「负责好玩」「负责好看」\nG3 加分：能指出三者产出物互相依赖（规则一改程序要改，程序限制反过来影响美术表现）",
+      "common_wrong": "只列角色名不给产出物；或把「制作人」「运营」混进来当作三大类之一",
+      "source_ref": "IGDA §3.3–3.6（Game Design / Game Programming / Visual Design / Audio Design）、§2；sources.md claim #8 #9"
+    },
+    {
+      "id": "q3",
+      "concept": "game-parts-roles",
+      "type": "boundary",
+      "difficulty": 2,
+      "prompt": "在这套分工里，哪些决定其实不归策划、程序、美术任何一方单独管？请举出一个「三方都有责任、出问题时却没人认领」的交界处，并解释为什么会这样。",
+      "reference_answer": "G3 判分要点：\n- 说出至少一个不归单一角色管的领域，如：整体手感/体验、性能预算、上线节奏、跨角色接口的定义\n- 举出具体交界处（如「打击感」：策划定规则、程序做反馈、美术做特效，但没人单独为「打起来爽不爽」负责）\n- 解释成因：分工按产出物划分，而体验是跨产出物的\n- 关键判据：能指出 IGDA 把「定义团队成员之间的接口」列为专门议题，正说明接口是天然易失守处\nG4 加分：能给出一个缓解手段（设 lead/producer，或明确接口负责人）",
+      "common_wrong": "答「都归制作人管」而不解释为什么交界处容易失守",
+      "source_ref": "IGDA §3.8（Defining the interfaces between team members；Team make-up；Establishing clear roles and clear goals）；sources.md claim #13"
+    },
+    {
+      "id": "q4",
+      "concept": "game-parts-roles",
+      "type": "counterexample",
+      "difficulty": 2,
+      "prompt": "假设一个团队只有策划和程序，完全没有美术。这套「策划/程序/美术」的分工模型，在什么情况下会失效？请具体说。",
+      "reference_answer": "G4 判分要点：\n- 指出模型失效的场景：没有美术时视觉资产从哪来（买素材/程序生成/策划兼做），以及这会如何反噬玩法与排期\n- 能自我修正：承认「三类角色」是常见划分但不是唯一划分，独立开发者常常一人多角\n- 不崩：能说明分工模型描述的是「职能」而不是「人数」\nG2 加分：能说出职能合并后的具体后果（如策划兼美术会挤压设计迭代时间）",
+      "common_wrong": "直接答「那就招一个美术」——回避了模型本身在什么条件下不适用",
+      "source_ref": "IGDA §3.8（Team make-up；Balancing talent, experience, budget）、§3.9（Independent vs Publisher/Developer）；sources.md claim #8 #13 #16"
+    },
+    {
+      "id": "q5",
+      "concept": "dev-pipeline",
+      "type": "explain",
+      "difficulty": 1,
+      "prompt": "一个游戏从想法到上线，通常要经过哪些阶段？请按顺序说出来。",
+      "reference_answer": "G1/G2 判分要点：\n- 能按顺序给出主要阶段，如：构思 → 原型 → 垂直切片 → 生产 → Alpha（功能完整）→ Beta（内容完整）→ 发布候选 → 发布\n- 允许粗粒度答案（预制作/制作/测试/上线），但必须有序\n- 不能只说「做完就上线」\nG3 加分：能说出上线之后还有运营与维护阶段",
+      "common_wrong": "只答「做、测、发」三步且不分顺序；或把「上线」当作终点",
+      "source_ref": "Rami Ismail 2022-09-26（开发时间线）、IGDA §3.8（Pre-production / Production / Testing；Shipping and maintaining customer loyalty）；sources.md claim #11 #17"
+    },
+    {
+      "id": "q6",
+      "concept": "dev-pipeline",
+      "type": "compare",
+      "difficulty": 2,
+      "prompt": "原型（prototype）和垂直切片（vertical slice）都在早期做，它们分别用来回答什么问题？为什么不能互相替代？",
+      "reference_answer": "G2 判分要点：\n- 原型回答「该不该做这个游戏」（玩法与乐趣是否成立）\n- 垂直切片回答「能不能做出来」（生产管线能否产出最终品质）\n- 目标不同：原型可以粗糙、只验一个机制；垂直切片要达到最终品质、打通全流程\n- 说清不能替代的原因：原型过了不代表做得出来，切片过了不代表好玩\nG4 加分：能指出混用两者的代价（时间与金钱被浪费）",
+      "common_wrong": "只说「原型更粗糙、切片更完整」，不说各自回答什么问题",
+      "source_ref": "Rami Ismail 2022-09-26（原型=该不该做，垂直切片=能不能做）；sources.md claim #18"
+    },
+    {
+      "id": "q7",
+      "concept": "dev-pipeline",
+      "type": "boundary",
+      "difficulty": 2,
+      "prompt": "为什么「功能都做完了」不等于「可以上线」？请举一个具体例子说明卡在哪。",
+      "reference_answer": "G3 判分要点：\n- 指出功能完成（Feature Complete）与内容完成（Content Complete）是两件事，之后还有打磨、平衡、性能、本地化、认证与审核\n- 举例：Alpha 只是「所有功能可用」，Beta 才是「所有内容就位」\n- 平台侧的具体约束：Steam 发布前 Valve 要审核批准，商店页与构建两张 checklist 都必须完成并通过，且商店页必须先于构建提交\nG2 加分：能把「做完」拆成功能/内容/品质/合规四层",
+      "common_wrong": "只答「还有 bug 要修」——没说出内容完整、平台审核这些独立关卡",
+      "source_ref": "Rami Ismail（Alpha=Feature Complete，Beta=Content Complete）、Steamworks Release Process；sources.md claim #5 #6 #7 #19"
+    },
+    {
+      "id": "q8",
+      "concept": "dev-pipeline",
+      "type": "apply",
+      "difficulty": 3,
+      "prompt": "一个 2 人小团队想做一款联机对战游戏，计划 6 个月上线。用你学到的阶段模型推演一下：他们最可能在哪一步卡住，为什么？",
+      "reference_answer": "G4/G2 判分要点：\n- 指出联机游戏在「垂直切片」阶段风险最高（网络同步要打通全流程才能验证）\n- 指出 6 个月对含联机的项目偏紧，联机调试与平衡通常吃掉大量时间\n- 能说出该团队应把原型聚焦在「联机是否可行」而非「玩法是否好玩」——可行性是更大的风险\n- 迁移能力：把阶段模型用到没见过的新场景，而不是复述原话\nG3 加分：能说出「砍功能」（IGDA 的 Dropping features）是常见应对",
+      "common_wrong": "只答「6 个月太短，做不完」——没有落到具体阶段与风险类型",
+      "source_ref": "Rami Ismail（垂直切片=验证能否做出来）、IGDA §3.8（Task breakdown；Dropping features；rapid prototyping）；sources.md claim #12 #17 #18"
+    },
+    {
+      "id": "q9",
+      "concept": "industry-money",
+      "type": "explain",
+      "difficulty": 1,
+      "prompt": "游戏有哪些主要的赚钱方式？至少说三种，并说清各自的收入从哪来。",
+      "reference_answer": "G1 判分要点：\n- 至少三种，如：买断制（一次性付费）、免费游玩加内购、订阅（按月/年）、广告、DLC/资料片\n- 每种要说清收入来源：谁在什么时候为什么付钱\n- 用大白话，不靠术语\nG3 加分：能说出商业模式会反过来影响玩法设计（如内购会引入数值付费点）",
+      "common_wrong": "只说「卖游戏」一种；或把「平台抽成」当成一种商业模式",
+      "source_ref": "IGDA §3.9（microtransactions、one-time payment、SaaS 月费、free to play with some features available to paying members）；sources.md claim #15"
+    },
+    {
+      "id": "q10",
+      "concept": "industry-money",
+      "type": "mechanism",
+      "difficulty": 2,
+      "prompt": "开发商、发行商、平台/渠道这三方，各自承担什么、分走什么？请说清钱是怎么从玩家流到开发商的。",
+      "reference_answer": "G2 判分要点：\n- 资金流向：玩家付钱 → 平台/渠道先抽成 → 发行商拿走其份额 → 开发商拿到剩余\n- 平台：提供分发、支付、审核与曝光；抽成（Steam 标准 70/30、Apple 15–30%、Google Play 15–30%）\n- 发行商：出资、发行、市场与渠道关系；换取分成或版权\n- 开发商：实际制作；拿开发费或分成\n- 每一步要有「主语+动作」，不能只说「平台抽成」\nG3 加分：能说出三方关系不固定（自研自发、独立开发者绕过发行商）",
+      "common_wrong": "只说「平台抽 30%」而不说发行商这一层；或把发行商与开发商混为一谈",
+      "source_ref": "IGDA §3.9（publishers/developers/distributors/marketers/retailers；Publisher/Developer Relationships；The deal）、Steam/Apple/Google 分成条款；sources.md claim #1 #3 #4 #14 #16"
+    },
+    {
+      "id": "q11",
+      "concept": "industry-money",
+      "type": "boundary",
+      "difficulty": 2,
+      "prompt": "平台的分成比例是固定的吗？在什么情况下会变？请用具体数字说明。",
+      "reference_answer": "G3 判分要点：\n- 不是固定的，会随收入规模或开发者资质变化\n- Steam：标准 70/30；单个应用收入超 $10M 后，超出部分 75/25；超 $50M 后，超出部分 80/20\n- Apple：年收入不超过 $1M 为 15%，标准 30%，欧盟及订阅满一年后 10%\n- Google Play：每年前 $1M 为 15%，超出部分 30%\n- 关键：能说清「超出部分」与「整体」的区别——阶梯只作用于阈值之上的部分\nG4 加分：能指出这些条款会变，引用时必须带生效日期",
+      "common_wrong": "答「都是 30%」；或把阶梯理解成「超过阈值后整体降为 25%」",
+      "source_ref": "Steam 官方公告（2018-10-01 生效）、Apple 官方页、Google Play 官方帮助页；sources.md claim #1 #3 #4"
+    },
+    {
+      "id": "q12",
+      "concept": "industry-money",
+      "type": "counterexample",
+      "difficulty": 2,
+      "prompt": "「游戏行业头部通吃」——这个说法在什么情况下不成立？请举一个反例。",
+      "reference_answer": "G4 判分要点：\n- 能构造反例，如：长尾独立游戏靠差异化小众题材存活；买断制单机不依赖规模效应；区域市场（如中国手游）渠道格局不同\n- 能自我修正：承认「头部通吃」在免费游玩加网络效应的品类里更成立，在买断制/内容型品类里较弱\n- 不崩：被追问时能调整判断，而不是全盘改口\nG2 加分：能说出「通吃」的机制（网络效应、规模摊薄成本、平台曝光集中）",
+      "common_wrong": "只答「有的小游戏也很赚钱」而不说清在什么条件下头部效应弱",
+      "source_ref": "IGDA §3.9（Independent vs Publisher/Developer；platform choices；distribution channels）、§3.8（典型预算与预算类别）；sources.md claim #14 #16"
+    },
+    {
+      "id": "q13",
+      "concept": "industry-money",
+      "type": "trace",
+      "difficulty": 3,
+      "prompt": "玩家在平台上花 100 元买了一份游戏。假设平台按标准档抽成、发行商与开发商五五分。请逐步算出开发商最后大概拿到多少，并说明每一步的假设。",
+      "reference_answer": "G2/G3 判分要点：\n- 逐步推：100 元 → 平台抽 30%（30 元）→ 剩 70 元 → 发行商与开发商五五分 → 开发商约 35 元\n- 必须说明假设：分成档位与五五比例都是假设，实际条款各异\n- 能指出若收入超过平台阈值，平台抽成下降，开发商到手会变多\n- 能指出未计入的项：税费、退款、支付通道费、地区定价差异\nG4 加分：主动声明「发行商/开发商五五分」属未取证（见 sources.md #21），是假设而非事实",
+      "common_wrong": "直接给出「35 元」而不声明假设；或把平台抽成算成「整体降到 25%」",
+      "source_ref": "Steam 官方公告（标准 70/30）、IGDA §3.9（Publisher/Developer Relationships）；sources.md claim #1 #14 #21"
+    }
+  ]
+}

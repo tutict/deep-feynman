@@ -101,9 +101,10 @@ feynman/<slug>/               每个学习主题一个工作区
 ├── bank.json                 题库（含 reference_answer 与 source_ref）
 ├── state.json                mastery / SM-2 排期（脚本独占，禁止手改）
 ├── gaps.md                   gap 台账（record 自动追加）
-├── notes.md                  费曼笔记（Phase 6 产出）
+├── notes.md                  费曼笔记（notes --scaffold 生成骨架，Phase 6 填）
+├── tests/                    自测卷（不含参考答案）
 ├── results/sN.json           每轮判分
-├── figures/                  可视化讲解图
+├── figures/                  可视化讲解图（Phase 6 按需创建）
 └── samples/                  一手材料副本（已 gitignore）
 ```
 
@@ -115,12 +116,16 @@ concepts  <slug> --file concepts.json          注册概念（保留已有 maste
 bank      <slug> --check                       校验题库
 test      <slug> [--n 8] [--concepts a,b] [--due-only] [--seed S]
 record    <slug> --results results/sN.json
+gaps      <slug> [--concept <id>] [--all]      列出 gap 台账 + 可粘贴的 resolves 片段
+notes     <slug> --scaffold [--force]          生成笔记骨架（灌入 gap 原话与信源）
 status    <slug>                               进度看板 + NEXT 建议
 ```
 
 脚本只做**确定性簿记**：加权分层抽样、SM-2、mastery、gap log。判分是模型的事——脚本校验的是结构自洽（四道门与 score 是否矛盾、severity 是否匹配、闭合的 gap 是否属于本轮），不判断内容对错。
 
 抽题权重 `(1-mastery)^1.5 × (1+0.2×lapses) × (0.8+0.2×difficulty)`，并分层保证概念覆盖广度；`apply` 题额外要求该概念 mastery ≥ 0.8 且无未闭合致命 gap 才进候选池。SM-2 的 `reps`/`lapses` 按概念每轮各推进一次（不管该轮考几道），分数取该概念本轮的最低分——短板决定排期。
+
+闭环里原先最手工的两处已经收进脚本：`gaps` 列出待闭合 gap 并给出可直接粘贴的 `resolves` 片段（不用再去翻 `state.json` 抄 `gid`）；`notes --scaffold` 生成笔记骨架，把 gap 原话灌进第 4 节、信源摘进第 7 节。
 
 参考答案与 `source_ref` 只留在 `bank.json`，不粘进试卷或对话，闭卷才有诊断价值。试卷同样不印题型、难度与概念 id：`explain→G1`、`boundary→G3`、`counterexample→G4` 的映射等于提前告诉学习者要考哪道门。
 
@@ -132,7 +137,7 @@ status    <slug>                               进度看板 + NEXT 建议
 node --test skills/ai-feynman/scripts/feynman.test.mjs
 ```
 
-25 条用例覆盖抽样、SM-2、判分校验、闸门与路径契约。新增约束时同时补一条用例，并确认它在改动前是红的、改动后转绿——没红过的测试证明不了它有牙。
+33 条用例覆盖抽样、SM-2、判分校验、闸门、路径契约与闭环命令。新增约束时同时补一条用例，并确认它在改动前是红的、改动后转绿——没红过的测试证明不了它有牙。
 
 ## 当前进行中的主题
 
