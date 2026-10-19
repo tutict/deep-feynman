@@ -7,6 +7,7 @@ import path from 'node:path';
 const SEVERITIES = ['致命', '重要', '细节'];
 const GAP_TYPES = ['术语遮蔽', '跳步', '伪因果', '边界失守', '类比反噬', '鹦鹉学舌', '粒度错配', '事实错误', '未验证'];
 const Q_TYPES = ['explain', 'mechanism', 'boundary', 'counterexample', 'trace', 'compare', 'apply'];
+const GATE_KEYS = ['G1', 'G2', 'G3', 'G4'];
 const FATAL_MASTERY_CAP = 0.4;
 const HISTORY_WINDOW = 5;
 const PASS_MASTERY = 0.8;
@@ -27,21 +28,59 @@ const cmd = argv[0];
 const slug = argv[1] && !argv[1].startsWith('--') ? argv[1] : null;
 
 function opt(name, fallback = null) {
+  // 同时接受 `--k v` 与 `--k=v`。原先只用 indexOf 找 `--k`，导致 `--k=v` 这种
+  // 等号写法整条匹配不上、静默落回 fallback —— --dir 传错时会写到错误目录还不报错。
   const i = argv.indexOf(`--${name}`);
-  return i !== -1 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : fallback;
+  if (i !== -1 && argv[i + 1] && !argv[i + 1].startsWith('--')) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(`--${name}=`));
+  if (eq != null) {
+    const v = eq.slice(name.length + 3);
+    if (v) return v;
+  }
+  return fallback;
 }
-const flag = (name) => argv.includes(`--${name}`);
+const flag = (name) => argv.includes(`--${name}`) || argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`));
 
 const ROOT = path.resolve(opt('dir', 'feynman'));
 const topicDir = slug ? path.join(ROOT, slug) : null;
 const statePath = () => path.join(topicDir, 'state.json');
 const bankPath = () => path.join(topicDir, 'bank.json');
 
+// cwd 必须是项目根，否则 path.resolve 会把工作区落到调用者当时的目录，
+// 静默分裂出第二份同名工作区。启动时就说清，比事后对着错目录排查便宜得多。
+// 标记文件覆盖常见 harness：.git（任何仓库）、.codex（Codex）、.qoder（Qoder）、
+// .agents（agent 配置目录）。skill 装在用户级（如 ~/.codex/skills/ai-feynman）时，
+// 项目根里不会有 skill 自己的目录，所以只能靠这些标记判断。
+const ROOT_MARKERS = ['.git', '.codex', '.qoder', '.agents'];
+function assertProjectRoot() {
+  const cwd = process.cwd();
+  if (ROOT_MARKERS.some((m) => fs.existsSync(path.join(cwd, m)))) return;
+  fail(
+    `必须在项目根执行（cwd: ${cwd}）\n` +
+      `未找到 ${ROOT_MARKERS.join(' / ')} 中的任何一个。工作区路径按 cwd 解析，在子目录里跑会静默创建第二份工作区。\n` +
+      `cd 到项目根后重试；确认路径无误也可显式指定 --dir <工作区根目录>。`,
+  );
+}
+
+// 文件查找：先试 cwd，再试工作区内。SKILL.md 的示例命令写的是裸文件名
+// （`concepts <slug> --file concepts.json`），而文件实际落在工作区里，
+// 只按 cwd 解析会 ENOENT。
+function resolveInputPath(file) {
+  const tried = [path.resolve(file)];
+  if (topicDir && !tried.includes(path.join(topicDir, file))) tried.push(path.join(topicDir, file));
+  for (const p of tried) if (fs.existsSync(p)) return p;
+  fail(`找不到文件: ${file}\n试过: ${tried.join('\n      ')}`);
+}
+
 // 提示里的后续命令必须是可直接复制执行的，否则调用方会照着 "node feynman.mjs ..." 跑出 ENOENT。
 // Windows 上统一用正斜杠：反斜杠在 Git Bash / sh 里会被当作转义符。
 const selfCmd = () => {
-  const rel = path.relative(process.cwd(), process.argv[1]).split(path.sep).join('/');
-  return `node ${rel && !rel.startsWith('..') ? rel : process.argv[1].split(path.sep).join('/')}`;
+  const abs = path.resolve(process.argv[1]).split(path.sep).join('/');
+  const rel = path.relative(process.cwd(), abs).split(path.sep).join('/');
+  // skill 装在 cwd 之外（用户级 ~/.codex/skills/ai-feynman）时 rel 会以 .. 开头，
+  // 那种相对路径换个目录就跑不通，直接给绝对路径。路径含空格时加引号。
+  const p = rel && !rel.startsWith('..') ? rel : abs;
+  return `node ${p.includes(' ') ? `"${p}"` : p}`;
 };
 
 function fail(msg) {
@@ -78,7 +117,9 @@ function addDays(iso, n) {
 }
 function stamp() {
   const d = new Date();
-  return `${fmtDate(d).replaceAll('-', '')}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+  // 末尾加随机后缀：原实现只精确到秒，同一秒内连出两卷会撞文件名互相覆盖。
+  const salt = Math.random().toString(36).slice(2, 6);
+  return `${fmtDate(d).replaceAll('-', '')}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}-${salt}`;
 }
 
 function loadState() {
@@ -195,7 +236,9 @@ function cmdInit() {
     sessions: {},
   });
   writeJSON(bankPath(), { questions: [] });
-  fs.writeFileSync(path.join(topicDir, 'sources.md'), `# 信源台账 · ${title}\n\n> 每条 claim 必须能回指到具体位置。状态: 已验证 / 推断 / 未知。\n\n| # | claim | 信源（file:line / URL#anchor / 论文 §） | 类型 | 抓取日期 | 状态 |\n|---|-------|------------------------------------------|------|----------|------|\n`, 'utf8');
+  // 表头用「级」与 references/sources.md 的规格一致（原先这里是「类型」，同一份台账两套列名）。
+  // 状态四态：已验证 / 推断 / 未知 / 已纠正（已纠正 = 取证后被更权威信源推翻并已改写）。
+  fs.writeFileSync(path.join(topicDir, 'sources.md'), `# 信源台账 · ${title}\n\n> 每条 claim 必须能回指到具体位置。状态: 已验证 / 推断 / 未知 / 已纠正。\n> 「未知」不是失职，是明确划出的边界：这些 claim 不作为判分依据。\n\n| # | claim | 信源（file:line / URL#anchor / 论文 §） | 级 | 抓取日期 | 状态 |\n|---|-------|------------------------------------------|----|----------|------|\n`, 'utf8');
   fs.writeFileSync(path.join(topicDir, 'notes.md'), `# 费曼笔记 · ${title}\n\n> Phase 6 才写。写作判据：一个聪明的外行读完能复述出机制链。\n`, 'utf8');
   fs.writeFileSync(path.join(topicDir, 'gaps.md'), `# Gap Log · ${title}\n\n> 由 record 子命令自动追加。这是本主题最有价值的资产：它记录你**曾经**以为懂了的地方。\n`, 'utf8');
 
@@ -218,7 +261,7 @@ function cmdConcepts() {
   const st = loadState();
   const file = opt('file');
   if (!file) fail('用法: concepts <slug> --file concepts.json');
-  const raw = readJSON(path.resolve(file), 'concepts 文件');
+  const raw = readJSON(resolveInputPath(file), 'concepts 文件');
   const list = Array.isArray(raw) ? raw : raw.concepts;
   if (!Array.isArray(list) || !list.length) fail('concepts 文件必须是非空数组，或 {concepts:[...]}');
 
@@ -264,6 +307,13 @@ function cmdBank() {
   const st = loadState();
   if (!flag('check')) fail(`用法: bank <slug> --check`);
   const qs = readJSON(bankPath(), 'bank.json').questions || [];
+  // 0 题的题库原本能「校验通过」，于是 Phase 2 的出口条件形同虚设。
+  if (!qs.length)
+    fail(
+      `题库为空: ${bankPath()}\n` +
+        `Phase 2 的出口是 bank --check 通过，空题库通过等于没有出口。\n` +
+        `先按 references/artifacts.md 的 schema 写 bank.json 再校验。`,
+    );
   const errs = [];
   const warns = [];
   const ids = new Set();
@@ -289,6 +339,18 @@ function cmdBank() {
     (c) => !qs.some((q) => q.concept === c && ['boundary', 'counterexample'].includes(q.type)),
   );
   if (noBoundary.length && qs.length) warns.push(`缺边界/反例题的概念（最易产生理解幻觉）: ${noBoundary.join(', ')}`);
+
+  // 出题规则（references/artifacts.md）原先完全没有校验。这里落实为警告而非阻断：
+  // 题库多样性是质量倾向，不是正确性，硬拦会挡住正在长出来的题库。
+  const perConceptCount = Object.keys(st.concepts).filter((c) => qs.filter((q) => q.concept === c).length < 3);
+  if (perConceptCount.length) warns.push(`题量不足 3 题的概念（判分覆盖面会偏窄）: ${perConceptCount.join(', ')}`);
+  const diff = { 1: 0, 2: 0, 3: 0 };
+  for (const q of qs) if (diff[q.difficulty] != null) diff[q.difficulty]++;
+  if (qs.length >= 6 && diff[3] === 0)
+    warns.push(`没有 difficulty 3 的题（约 ${qs.length} 题时应占 1/4）—— 最难档缺失会让「能扛住复杂场景」无法被检验`);
+  if (qs.length >= 6 && diff[1] / qs.length > 0.5) warns.push(`难度 1 占比 ${Math.round((diff[1] / qs.length) * 100)}%（建议约 25%），题目整体偏简单`);
+  const applyQ = qs.filter((q) => q.type === 'apply');
+  if (!applyQ.length) warns.push(`无 apply 题——apply 是达标后的迁移题，缺它则无法检验「能不能用」而非「能不能复述」`);
 
   if (warns.length) {
     console.log(`警告 ${warns.length} 条:`);
@@ -335,8 +397,12 @@ function cmdTest() {
 
   const n = Math.max(1, parseInt(opt('n', '8'), 10) || 8);
   const rand = rng(opt('seed'));
+  // apply 题是 L5「达标后才出」的迁移题。未达标就出它，等于让用户去套一个
+  // 他还没建立起来的机制作答，答错会被记成 gap —— 那是测量误差不是理解缺口。
+  const applyReady = (cid) => (st.concepts[cid].mastery ?? 0) >= PASS_MASTERY && openGaps(st.concepts[cid], '致命').length === 0;
   const wOf = (q) => {
     const c = st.concepts[q.concept];
+    if (q.type === 'apply' && !applyReady(q.concept)) return 0;
     return (
       Math.pow(Math.max(0.05, 1 - (c.mastery ?? 0)), 1.5) *
       (1 + 0.2 * (c.lapses ?? 0)) *
@@ -344,10 +410,22 @@ function cmdTest() {
     );
   };
 
+  // 未达标概念的 apply 题直接移出候选池。只把权重置 0 是不够的：
+  // 若某个概念剩下的题全是 apply，它那组的权重和为 0，pickWeighted 会退化成随机选，
+  // 于是 apply 题照样会被抽中。移出池子是唯一能保证「不出」的做法。
+  const blocked = pool.filter((q) => q.type === 'apply' && !applyReady(q.concept));
+  if (blocked.length) pool = pool.filter((q) => !(q.type === 'apply' && !applyReady(q.concept)));
+  if (!pool.length)
+    fail(
+      `候选池里只剩未达标的 apply 题（${blocked.map((q) => q.id).join(', ')}），无法出卷。\n` +
+        `apply 是达标后的迁移题。请先补该概念的普通题，或先复述把 mastery 提到 ${PASS_MASTERY} 以上。`,
+    );
+
   // 分层抽样：先按概念权重选概念，并对已选中的概念做衰减，保证覆盖广度而非集中刷一个概念。
   const chosen = [];
   const remaining = [...pool];
   const perConcept = {};
+  // pool 在上面可能被剔掉了未达标的 apply 题，limit 必须跟着重算。
   const limit = Math.min(n, pool.length);
   while (chosen.length < limit && remaining.length) {
     const groups = {};
@@ -368,6 +446,9 @@ function cmdTest() {
   const round = st.round + 1;
   const ts = stamp();
   st.sessions[sid] = { id: sid, ts, round, due_only: flag('due-only'), question_ids: chosen.map((q) => q.id), recorded: false };
+  // round 在出卷时就分配并持久化。原先只在 record 里回写 st.round，导致：
+  // 连出两张卷都记第 1 轮；乱序 record 还会把 round 回退到更小的值。
+  st.round = round;
   writeJSON(statePath(), st);
 
   const paperPath = path.join(topicDir, 'tests', `${ts}-${sid}.md`);
@@ -375,7 +456,14 @@ function cmdTest() {
   const resultsPath = path.join(topicDir, 'results', `${sid}.json`);
   writeJSON(resultsPath, {
     session: sid,
-    graded: chosen.map((q) => ({ question_id: q.id, score: null, gap_type: null, severity: null, note: '' })),
+    graded: chosen.map((q) => ({
+      question_id: q.id,
+      score: null,
+      gates: { G1: null, G2: null, G3: null, G4: null },
+      gap_type: null,
+      severity: null,
+      note: '',
+    })),
     resolves: [],
   });
 
@@ -396,13 +484,18 @@ function renderPaper(st, sid, round, chosen) {
   L.push('> 答不上来就直接写「不知道」——暴露 gap 是这份卷子的唯一目的，猜对不算通过。');
   L.push('');
   L.push(`- Session: \`${sid}\` · 第 ${round} 轮 · 生成于 ${todayISO()}`);
-  L.push(`- 题数: ${chosen.length} · 覆盖概念: ${new Set(chosen.map((q) => q.concept)).size}`);
+  L.push(`- 题数: ${chosen.length}`);
   if (st.target) L.push(`- 学习目标: ${st.target}`);
   L.push('');
   L.push('---');
+  // 判分说明段不在这里给学习者看：它会列出 gap_type 全名，
+  // 等于提示「答不上来大概属于哪类幻觉」，削弱闭卷的诊断价值。
+  // 判分口径由模型按 references/probing.md 执行。
   chosen.forEach((q, i) => {
     L.push('');
-    L.push(`## Q${i + 1} · \`${q.id}\` · 难度 ${q.difficulty} · ${q.type} · 概念 \`${q.concept}\``);
+    // 只给题号与题干。题型→门的映射是判分依据（explain→G1、boundary→G3、
+    // counterexample→G4），印出 type/难度/概念 等于提前告诉学习者要考哪道门。
+    L.push(`## Q${i + 1}`);
     L.push('');
     L.push(String(q.prompt).trim());
     L.push('');
@@ -411,11 +504,6 @@ function renderPaper(st, sid, round, chosen) {
     L.push('---');
   });
   L.push('');
-  L.push('## 判分（由 AI 完成，不要自评通过）');
-  L.push('');
-  L.push(`把判分写进 \`results/${sid}.json\`：每题 \`score\` 取 2=通过 / 1=部分 / 0=未通过；`);
-  L.push(`未通过的题必须填 \`gap_type\`（${GAP_TYPES.join(' / ')}）与 \`severity\`（${SEVERITIES.join(' / ')}）。`);
-  L.push('');
   return L.join('\n');
 }
 
@@ -423,22 +511,38 @@ function renderPaper(st, sid, round, chosen) {
 function cmdRecord() {
   const st = loadState();
   const pending = Object.values(st.sessions).filter((s) => !s.recorded);
-  const sid = opt('session') || (pending.length ? pending[pending.length - 1].id : null);
-  if (!sid || !st.sessions[sid]) {
+
+  const rf = opt('results');
+  if (!rf) fail(`用法: record <slug> --results results/<sid>.json [--session <sid>]`);
+  const res = readJSON(resolveInputPath(rf), 'results 文件');
+  const graded = Array.isArray(res) ? res : res.graded;
+  if (!Array.isArray(graded) || !graded.length) fail('results 文件必须是 {session, graded:[...]} 或非空数组');
+
+  // session 绑定优先级：显式 --session > results 文件里的 session 字段 > 唯一待记录卷。
+  // 原先只取「最新未记录卷」，而 SKILL.md 的示例命令恰恰不带 --session ——
+  // 出了两张卷后 `record --results results/s1.json` 会绑到 s2 并报「不属于 session s2」。
+  let sid = opt('session');
+  if (!sid && res.session && st.sessions[res.session]) sid = res.session;
+  if (!sid && pending.length === 1) sid = pending[0].id;
+  if (!sid) {
     const list = Object.values(st.sessions).map((s) => `${s.id}(${s.recorded ? '已记录' : '待判分'})`).join(', ');
+    if (pending.length > 1)
+      fail(
+        `有 ${pending.length} 张卷待记录，无法判断你要记哪一张。请显式指定 --session <sid>。\n` +
+          `待记录: ${pending.map((s) => s.id).join(', ')}\n全部: ${list}`,
+      );
     fail(
       `未找到待记录的 session。\n现有: ${list || '(无 — 先运行 test 出卷)'}\n` +
         (pending.length ? '' : '所有卷子都已记录过。重复计分会污染 mastery 与 SM-2 排期，请先运行 test 生成新一轮。'),
     );
   }
+  if (!st.sessions[sid]) {
+    fail(`session "${sid}" 不存在。现有: ${Object.keys(st.sessions).join(', ') || '(无)'}`);
+  }
+  if (res.session && res.session !== sid)
+    fail(`--results 文件声明 session=${res.session}，但记录的是 ${sid}。两者必须一致。`);
   const ses = st.sessions[sid];
   if (ses.recorded) fail(`session ${sid} 已于 ${ses.recorded_at || '(未知日期)'} 记录过，不可重复计分（会污染 mastery 与 SM-2 排期）`);
-
-  const rf = opt('results');
-  if (!rf) fail(`用法: record <slug> --results results/${sid}.json [--session ${sid}]`);
-  const res = readJSON(path.resolve(rf), 'results 文件');
-  const graded = Array.isArray(res) ? res : res.graded;
-  if (!Array.isArray(graded) || !graded.length) fail('results 文件必须是 {session, graded:[...]} 或非空数组');
 
   const qs = readJSON(bankPath(), 'bank.json').questions || [];
   const byId = Object.fromEntries(qs.map((q) => [q.id, q]));
@@ -449,16 +553,54 @@ function cmdRecord() {
   graded.forEach((g, i) => {
     const at = `graded[${i}]${g.question_id ? ` (${g.question_id})` : ''}`;
     if (!g.question_id) return errs.push(`${at}: 缺 question_id`);
-    if (!byId[g.question_id]) return errs.push(`${at}: bank.json 中不存在该题`);
+    // 一次 return 就收住这道题的错误：原先继续往下跑会再报一条「概念未注册 → undefined」，
+    // 同一个问题出现在错误列表两次。
+    if (!byId[g.question_id]) return errs.push(`${at}: bank.json 中不存在该题（不会重复报概念未注册）`);
     if (!expected.has(g.question_id)) errs.push(`${at}: 不属于 session ${sid}（该卷题目: ${ses.question_ids.join(', ')}）`);
     if (![0, 1, 2].includes(g.score)) return errs.push(`${at}: score 必须是 0 / 1 / 2`);
+
+    // 四道门证据（gates）。脚本只校验 gates 与 score 是否自洽，不判断内容真假 ——
+    // 这正是「纯簿记」的边界：拦的是自相矛盾的判分，不是错误的判分。
+    const gates = g.gates;
+    if (!gates || typeof gates !== 'object' || GATE_KEYS.some((k) => typeof gates[k] !== 'boolean')) {
+      return errs.push(
+        `${at}: 缺 gates 证据 —— 四道门必须逐门给出布尔值 {G1,G2,G3,G4}。\n` +
+          `    映射: score 2 ⟺ 四门全 true；score 1 ⟺ G1+G2 true 且 G3/G4 有 false；score 0 ⟺ G1 或 G2 为 false。\n` +
+          `    规范见 references/probing.md「通过判据：四道门」。缺它则 score 无从校验——脚本无法复核，闸门失效。`,
+      );
+    }
+    const failed = GATE_KEYS.filter((k) => !gates[k]);
+    const coreFailed = !gates.G1 || !gates.G2; // 缺 G1/G2 = 机制链本身断裂
+    if (g.score === 2 && failed.length)
+      errs.push(`${at}: score 2 但 ${failed.join('、')} 未通过 —— 四道门全过才能给 2。判分与 gates 自相矛盾。`);
+    if (g.score === 1 && (coreFailed || !failed.length))
+      errs.push(
+        `${at}: score 1 要求 G1+G2 为 true 且 G3 或 G4 有 false（当前 ${GATE_KEYS.map((k) => `${k}=${gates[k]}`).join(' ')}）。`,
+      );
+    if (g.score === 0 && !coreFailed)
+      errs.push(`${at}: score 0 要求 G1 或 G2 为 false，但四门全 true —— gates 与 score 矛盾。`);
+
     if (g.score < 2) {
       if (!SEVERITIES.includes(g.severity)) errs.push(`${at}: 未通过必须给 severity (${SEVERITIES.join(' / ')})`);
+      // severity 决定 mastery 是不是被封顶 0.4。原先只校验枚举合法，
+      // 模型把 score 0 全标「细节」就能让致命 gap 封顶永不触发 —— 唯一硬闸门形同虚设。
+      else if (g.severity === '细节')
+        errs.push(
+          `${at}: severity「细节」不能配 score ${g.score}。未通过就没有「细节」级 gap。` +
+            (g.score === 0 ? '（若确属纯记忆型事实错误且不污染机制链，可把 severity 降为「重要」并在 note 里写明理由。）' : ''),
+        );
+      else if (g.score === 0 && g.severity !== '致命')
+        errs.push(
+          `${at}: score 0（缺 G1/G2，机制链断裂）必须是 severity「致命」，当前为「${g.severity}」。` +
+            `降级仅允许纯记忆型事实错误：改填「重要」并在 note 里写明不污染机制链的理由。`,
+        );
+      else if (g.score === 1 && g.severity === '致命')
+        errs.push(`${at}: score 1（G1+G2 过，缺边界/反例）应为 severity「重要」，当前为「致命」。虚增严重度会无谓封顶 mastery。`);
       if (!g.gap_type) errs.push(`${at}: 未通过必须给 gap_type`);
       else if (!GAP_TYPES.includes(g.gap_type)) errs.push(`${at}: gap_type "${g.gap_type}" 不在分类表 (${GAP_TYPES.join(' / ')})`);
       if (!g.note || String(g.note).trim().length < 4) errs.push(`${at}: 未通过必须写 note（说明错在哪，供回源定位）`);
     }
-    if (!st.concepts[byId[g.question_id]?.concept]) errs.push(`${at}: 概念未注册 → ${byId[g.question_id]?.concept}`);
+    if (!st.concepts[byId[g.question_id]?.concept]) errs.push(`${at}: 概念未注册 → ${byId[g.question_id]?.concept ?? '(未知)'}`);
   });
   const missing = [...expected].filter((id) => !graded.some((g) => g.question_id === id));
   if (missing.length) errs.push(`session ${sid} 有 ${missing.length} 题未判分: ${missing.join(', ')}`);
@@ -469,6 +611,19 @@ function cmdRecord() {
   const badResolves = resolves.filter((gid) => !allGaps.some(({ g }) => g.gid === gid));
   if (badResolves.length) errs.push(`resolves 中找不到的 gap id: ${badResolves.join(', ')}（现有: ${allGaps.map(({ g }) => g.gid).join(', ') || '(无)'}）`);
 
+  // 「闭合」必须发生在这道 gap 所属概念被重新考到的这一轮。
+  // 原先只校验 gid 存在，于是同一次 record 就能一边判别概念全过、一边关掉任意致命 gap。
+  const thisRoundConcepts = new Set(ses.question_ids.map((id) => byId[id]?.concept).filter(Boolean));
+  for (const gid of resolves) {
+    const hit = allGaps.find(({ g }) => g.gid === gid);
+    if (!hit) continue;
+    if (!thisRoundConcepts.has(hit.c.id))
+      errs.push(
+        `resolves 含 ${gid}，但它属于概念 ${hit.c.id}，而本轮 ${sid} 未考该概念（本轮概念: ${[...thisRoundConcepts].join(', ') || '(无)'}）。\n` +
+          `    闭合必须基于本轮复述通过：先 test --concepts ${hit.c.id} 出卷并判分，再在那一轮的 resolves 里闭合它。`,
+      );
+  }
+
   if (errs.length) {
     console.error('ERROR: results 校验失败，状态未写入:');
     for (const e of errs.slice(0, 40)) console.error(`  - ${e}`);
@@ -478,12 +633,31 @@ function cmdRecord() {
 
   const before = {};
   const gapLines = [];
+
+  // SM-2 按**概念每轮一次**推进，而不是按题。原先 schedule() 在 graded.forEach 内，
+  // 一个 session 里同概念考 3 道全过 → reps=3、interval 走 1→3→8 天：
+  // reps 的语义是复习轮次，被题数灌水，一轮就把概念排到 8 天后。
+  // 分数取该概念本轮的最低分——短板决定排期，不能让三道对的盖过一道错的。
+  const byConcept = new Map();
+  for (const g of graded) {
+    const cid = byId[g.question_id].concept;
+    const cur = byConcept.get(cid);
+    if (!cur) byConcept.set(cid, { minScore: g.score, anyFail: false });
+    else {
+      cur.minScore = Math.min(cur.minScore, g.score);
+      if (g.score < 2) cur.anyFail = true;
+    }
+  }
+  for (const [cid, agg] of byConcept) {
+    const c = st.concepts[cid];
+    schedule(c, agg.minScore);
+  }
+
   for (const g of graded) {
     const q = byId[g.question_id];
     const c = st.concepts[q.concept];
     before[c.id] ??= c.mastery ?? 0;
     c.history = [...(c.history || []), { session: sid, score: g.score, date: todayISO() }];
-    schedule(c, g.score);
 
     if (g.score < 2) {
       st.gap_seq = (st.gap_seq || 0) + 1;
@@ -526,7 +700,8 @@ function cmdRecord() {
   ses.recorded = true;
   ses.recorded_at = todayISO();
   ses.resolved_gaps = resolves;
-  st.round = ses.round;
+  // 不再回写 st.round：round 在 test 出卷时已分配并持久化，
+  // 在这里回写会让乱序 record 把 round 回退到更早的轮次。
   writeJSON(statePath(), st);
   if (gapLines.length) appendText(path.join(topicDir, 'gaps.md'), `\n${gapLines.join('\n')}`);
 
@@ -604,6 +779,7 @@ try {
   }
   const fn = COMMANDS[cmd];
   if (!fn) fail(`未知命令: ${cmd}\n${USAGE}`);
+  assertProjectRoot();
   fn();
 } catch (e) {
   fail(e && e.message ? e.message.split('\n')[0] : String(e));

@@ -1,0 +1,8 @@
+interface:
+  display_name: "AI 费曼学习法"
+  short_description: "用费曼学习法带用户闭卷复述、挑出理解 gap、补到真懂"
+  brand_color: "#4F46E5"
+  default_prompt: "用 $ai-feynman 教我 X，然后检验我是不是真的懂了。"
+
+policy:
+  allow_implicit_invocation: true
